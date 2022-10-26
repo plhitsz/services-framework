@@ -1,0 +1,58 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Cmake Build
+build*
+cmake/open-cpp-coverage.cmake
+cmake-build-*/
+prefix/
+CMakeLists.txt.user
+CMakeUserPresets.json
+
+# IDE
+.idea/
+.vs/
+.vscode/
+
+# Google Test
+bld*
+
+# temp dir
+tmp*
+
+# tag files
+*tags*
+
+# patch files
+*patch
+*.log
