@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "lanza.lldb-vscode",
+        "vadimcn.vscode-lldb",
+        "hbenl.vscode-test-explorer",
+        "yzhang.markdown-all-in-one"
+    ]
+}
