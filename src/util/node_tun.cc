@@ -44,6 +44,7 @@ bool Tun::Init() {
     close(fd_);
     return false;
   }
+  is_stop_ = false;
   return true;
 }
 

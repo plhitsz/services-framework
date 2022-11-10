@@ -13,6 +13,7 @@
 #define SRC_EXAMPLE_APP_SRC_NODE_TUN_H_
 #include "channel.h"
 #include "node.h"
+#include "node_duplex.h"
 
 namespace bats {
 namespace src {
@@ -21,25 +22,23 @@ namespace src {
  * @brief A tun service.
  *
  */
-class Tun : public Node<MsgChannel, NodeType::NODE_TUN> {
+class Tun : public NodeDuplex {
  public:
-  typedef typename MsgChannel::value_type msg_type;
-  Tun() {
+  Tun() : NodeDuplex("TUN") {
     if (!Init()) {
       throw std::runtime_error("TUN node init failed.");
     }
   }
-  virtual ~Tun() { close(fd_); }
-  virtual int GetFd() { return fd_; }
-  virtual int SourceRecv();
-  virtual int SinkWrite(const msg_type& msg);
-  virtual auto HandleMsg(const msg_type& msg) -> msg_type;
+  virtual ~Tun() {}
+  // Node
+  auto HandleMsg(const msg_type& msg) -> msg_type override;
+
+  // FullDuplex
+  int SourceRecv() override;
+  int SinkWrite(const msg_type& msg) override;
+  bool Init() override;
 
  private:
-  bool Init();
-
- private:
-  int fd_ = -1;
   DISALLOW_COPY_AND_ASSIGN(Tun)
 };
 

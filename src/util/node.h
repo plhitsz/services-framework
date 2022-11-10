@@ -20,23 +20,45 @@
 #include "macros.h"
 
 enum class NodeType {
-  NODE_SOURCE,  // node without up channels.
-  NODE_SINK,    // node without down channels.
-  NODE_RELAY,   // node process data from up channels.
-  NODE_UDP,     // UDP node
-  NODE_TUN,     // TUN node
+  NODE_SOURCE,       // node without up channels.
+  NODE_SINK,         // node without down channels.
+  NODE_FULL_DUPLEX,  //  like udp/tcp or tun service.
+  NODE_RELAY,        // node process data from up channels.
 };
+/**
+ * @brief The object represents thoese things which may be used to receive and
+ * send data at the same time.
+ *
+ * @tparam M
+ */
+template <typename M>
+class FullDuplex {
+ public:
+  FullDuplex() = default;
+  virtual ~FullDuplex() {
+    if (fd_ != -1) close(fd_);
+  }
+  int GetFd() const { return fd_; }
+  virtual int SourceRecv() = 0;
+  virtual int SinkWrite(const M& msg) = 0;
+
+ protected:
+  // The file descriptor
+  int fd_ = -1;
+};
+
 /**
  * @brief Read message from related channels and process.
  * The node itself may be a thread or a process or multi-threads.
  *
  */
-template <typename CHN, NodeType type = NodeType::NODE_RELAY>
+template <typename CHN, NodeType type>
 class Node {
  public:
   // the message type of specified channels.
   typedef typename CHN::value_type msg_type;
   Node() = default;
+  Node(const std::string& name) : name_(name) {}
   virtual ~Node() = default;
   const NodeType Type() const;
   const std::string& GetName() const;
@@ -58,49 +80,48 @@ class Node {
   CHN& GetChannel(int i, bool is_down);
   int GetChannelNum(bool is_down);
   /**
-   * @brief Increase the number of threads which will work on `DoWork` func.
-   *
-   * @return int
-   */
-  int IncThreads();
-  /**
-   * @brief Process the data from up-channel and relay data to down-channel.
-   * This function is the entry of threads.
-   */
-  void DoWork();
-  /**
-   * @brief Write msg to fd. TUN and UDP node will handle writting on `fd`.
-   *
-   * @param channel
-   */
-  void HandleWritting(CHN& channel);
-  /**
    * @brief Realy msg to other nodes.
    *
    * @param channel
    */
   void HandlerRelaying(CHN& channel);
   /**
+   * @brief Process the data from up-channel and relay data to down-channel.
+   * This function is the entry of threads.
+   */
+  virtual void DoWork();
+  /**
    * @brief Dispatch msg to down nodes.
    *
    * @param msg
    */
   virtual void Dispatch(const msg_type& msg);
-  // Do receiving from fd
-  virtual int SourceRecv() = 0;
-  // Do wrtting to fd
-  virtual int SinkWrite(const msg_type& msg) = 0;
+  /**
+   * @brief Write msg to fd. TUN and UDP node will handle writting on `fd`.
+   *
+   * @param channel
+   */
+  virtual void HandleWritting(CHN& channel) = 0;
   // process the msg.
   virtual auto HandleMsg(const msg_type& msg) -> msg_type = 0;
-
-  virtual int GetFd() = 0;
-
- private:
+  /**
+   * @brief Thread affinty
+   *
+   */
   void ThreadAffinity();
+  /**
+   * @brief Increase the number of threads which will work on `DoWork` func.
+   *
+   * @return int
+   */
+  int IncThreads();
+
+  bool isOk() { return !is_stop_; }
 
  protected:
   std::mutex mutex_;
-  bool is_stop_ = false;
+  // init state is in `stopped` state
+  bool is_stop_ = true;
   int nid_ = 0;
   int tid_ = 0;
   int worker_cnt_ = 0;
@@ -152,17 +173,6 @@ void Node<CHN, type>::Dispatch(const msg_type& msg) {
 }
 
 template <typename CHN, NodeType type>
-void Node<CHN, type>::HandleWritting(CHN& channel) {
-  msg_type msg;
-  // receive
-  channel.ReadMessage(msg);
-  // process
-  auto res = HandleMsg(msg);
-  // write
-  SinkWrite(res);
-}
-
-template <typename CHN, NodeType type>
 void Node<CHN, type>::HandlerRelaying(CHN& channel) {
   msg_type msg;
   // receive
@@ -178,18 +188,8 @@ void Node<CHN, type>::DoWork() {
   ThreadAffinity();
   auto chn_index = IncThreads();
   auto& channel = up_channels_.at(chn_index);
-  std::function<void(CHN&)> handler;
-  switch (type) {
-    case NodeType::NODE_UDP:
-    case NodeType::NODE_TUN:
-      handler = std::bind(&Node::HandleWritting, this, std::placeholders::_1);
-      break;
-    case NodeType::NODE_RELAY:
-      handler = std::bind(&Node::HandlerRelaying, this, std::placeholders::_1);
-      break;
-    default:
-      break;
-  }
+  std::function<void(CHN&)> handler =
+      std::bind(&Node::HandlerRelaying, this, std::placeholders::_1);
   while (!is_stop_) {
     handler(channel);
   }

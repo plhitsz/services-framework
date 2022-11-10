@@ -18,6 +18,7 @@
 
 #include "channel.h"
 #include "node.h"
+#include "node_duplex.h"
 #include "poll_data.h"
 #include "poller.h"
 /**
@@ -77,14 +78,11 @@ class NodeManager {
    * @brief For udp or tun node, they are using `SourceRecv` to get input data.
    * Other `relay` nodes no neeed to call this function.
    *
-   * @tparam CHN
-   * @tparam type
    * @param node
    * @return true
    * @return false
    */
-  template <typename CHN, NodeType type>
-  inline bool RegisterToPoller(Node<CHN, type>& node);
+  inline bool RegisterToPoller(NodeDuplex& node);
 
  private:
   NodeManager() = default;
@@ -119,7 +117,7 @@ bool NodeManager::Connect(Node<CHN, uptype>& up, Node<CHN, downtype>& down,
     flow = up.GetName() + "[in] ---(";
   }
   bool down_use_out = false;
-  if (downtype == NodeType::NODE_TUN || downtype == NodeType::NODE_UDP) {
+  if (downtype == NodeType::NODE_FULL_DUPLEX) {
     down_use_out = true;
   } else {
     down_use_out = false;
@@ -176,18 +174,12 @@ bool NodeManager::Connect(Node<CHN, uptype>& up, Node<CHN, downtype>& down,
 template <typename CHN, NodeType type>
 bool NodeManager::RunAsThreads(Node<CHN, type>& node, int num) {
   for (int i = 0; i < num; i++) {
-    worker_list_.emplace_back(
-        std::thread(&Node<CHN, type>::DoWork, this, node));
+    worker_list_.emplace_back(std::thread(&Node<CHN, type>::DoWork, &node));
   }
   return true;
 }
 
-template <typename CHN, NodeType type>
-inline bool NodeManager::RegisterToPoller(Node<CHN, type>& node) {
-  if (node.Type() != NodeType::NODE_TUN && node.Type() != NodeType::NODE_UDP) {
-    LOG(INFO) << "Poller do not support such a node type.";
-    return false;
-  }
+inline bool NodeManager::RegisterToPoller(NodeDuplex& node) {
   bats::io::PollRequest req;
   req.fd = node.GetFd();
   assert(req.fd > 0);
@@ -195,8 +187,8 @@ inline bool NodeManager::RegisterToPoller(Node<CHN, type>& node) {
   req.events = EPOLLIN | EPOLLET;  // level trigger
   req.timeout_ms = 0;
   // FIXME: refer ? or pointer.
-  //  req.ser = node;
-  req.callback = [&node](const bats::io::PollResponse& rsp) {
+  // req.ser = node;
+  req.callback = [](const bats::io::PollResponse& rsp, NodeDuplex& node) {
     auto& response = rsp;
     if (response.events & EPOLLIN) {
       while (true) {

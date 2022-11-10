@@ -9,3 +9,5 @@ target_link_libraries(base-src PUBLIC
     ${GLOG_LIBRARY}
     ${GFLAGS_LIBRARY}
     Threads::Threads)
+
+    add_subdirectory(test)

@@ -46,6 +46,7 @@ bool Udp::Init() {
     return false;
   }
   LOG(INFO) << "bind socket " << fd_ << " on port " << port_;
+  is_stop_ = false;
   return true;
 }
 

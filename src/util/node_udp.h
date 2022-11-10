@@ -13,6 +13,7 @@
 #define SRC_EXAMPLE_APP_SRC_NODE_UDP_H_
 #include "channel.h"
 #include "node.h"
+#include "node_duplex.h"
 
 namespace bats {
 namespace src {
@@ -20,26 +21,24 @@ namespace src {
  * @brief A udp service which is used to send protocol data to an endpoint.
  *
  */
-class Udp : public Node<MsgChannel, NodeType::NODE_UDP> {
+class Udp : public NodeDuplex {
  public:
-  typedef typename MsgChannel::value_type msg_type;
-  explicit Udp(uint16_t port) : port_(port) {
+  explicit Udp(uint16_t port) : NodeDuplex("UDP"), port_(port) {
     if (!Init()) {
       throw std::runtime_error("UDP node init failed.");
     }
   }
-  virtual ~Udp() { close(fd_); }
-  virtual int GetFd() { return fd_; }
-  virtual int SourceRecv();
-  virtual int SinkWrite(const msg_type& msg);
+  virtual ~Udp() {}
+  // Node
   virtual auto HandleMsg(const msg_type& msg) -> msg_type;
 
- private:
-  bool Init();
+  // FullDuplex
+  int SourceRecv() override;
+  int SinkWrite(const msg_type& msg) override;
+  bool Init() override;
 
  private:
   uint16_t port_ = 0;
-  int fd_ = -1;
   DISALLOW_COPY_AND_ASSIGN(Udp)
 };
 
