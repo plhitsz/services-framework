@@ -17,9 +17,8 @@
 
 using BatsEncoder_ptr = std::shared_ptr<bats::BatsEncoder>;
 
-class Encoder : public Node<MsgChannel, NodeType::NODE_RELAY> {
+class Encoder : public Node<MsgChannelPtr, NodeType::NODE_RELAY> {
  public:
-  typedef typename MsgChannel::value_type msg_type;
   Encoder() {
     encode_ = std::make_shared<bats::BatsEncoder>();
     // used to reserve header room for coded msg.
@@ -33,9 +32,9 @@ class Encoder : public Node<MsgChannel, NodeType::NODE_RELAY> {
     encode_->setPrecodeSchema(pre);
   }
   virtual ~Encoder() {}
-  virtual int GetFd() { return -1; }
-  virtual int SourceRecv() {}
-  virtual int SinkWrite(const msg_type& msg) {}
+  virtual void HandleWritting(MsgChannelPtr& channel) {
+    // nothing to write
+  }
   virtual auto HandleMsg(const msg_type& msg) -> msg_type {
     if (!msg) {
       return nullptr;

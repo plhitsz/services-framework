@@ -48,6 +48,6 @@ class QueueBasedChannel : public BaseChannel<T> {
   DISALLOW_COPY_AND_ASSIGN(QueueBasedChannel)
 };
 
-using MsgChannel = QueueBasedChannel<BaseMsg_ptr>;
+using MsgChannelPtr = std::shared_ptr<QueueBasedChannel<BaseMsg_ptr>>;
 
 #endif  // SRC_EXAMPLE_APP_SRC_CHANNEL_H_

@@ -26,10 +26,10 @@
 namespace bats {
 namespace src {
 
-const std::string TUN_DEVICE = "/dev/net/tun";
+const char TUN_DEVICE[] = "/dev/net/tun";
 
 bool Tun::Init() {
-  if ((fd_ = open(TUN_DEVICE.c_str(), O_RDWR)) < 0) {
+  if ((fd_ = open(TUN_DEVICE, O_RDWR)) < 0) {
     LOG(INFO) << "Opening " << TUN_DEVICE << " failed";
     return false;
   }
@@ -48,7 +48,7 @@ bool Tun::Init() {
   return true;
 }
 
-int Tun::SourceRecv() {
+int Tun::FDRecv() {
   typedef typename msg_type::element_type msg_org_type;
   msg_type msg = std::make_shared<msg_org_type>();
   int ret = read(fd_, (char*)msg->begin(), msg->size());
@@ -59,7 +59,7 @@ int Tun::SourceRecv() {
   return ret;
 }
 
-int Tun::SinkWrite(const msg_type& msg) {
+int Tun::FDWrite(const msg_type& msg) {
   if (!msg) {
     return -1;
   }

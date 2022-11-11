@@ -34,8 +34,8 @@ class Tun : public NodeDuplex {
   auto HandleMsg(const msg_type& msg) -> msg_type override;
 
   // FullDuplex
-  int SourceRecv() override;
-  int SinkWrite(const msg_type& msg) override;
+  int FDRecv() override;
+  int FDWrite(const msg_type& msg) override;
   bool Init() override;
 
  private:

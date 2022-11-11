@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "macros.h"
+#include "types.h"
 
 enum class NodeType {
   NODE_SOURCE,       // node without up channels.
@@ -39,8 +40,8 @@ class FullDuplex {
     if (fd_ != -1) close(fd_);
   }
   int GetFd() const { return fd_; }
-  virtual int SourceRecv() = 0;
-  virtual int SinkWrite(const M& msg) = 0;
+  virtual int FDRecv() = 0;
+  virtual int FDWrite(const M& msg) = 0;
 
  protected:
   // The file descriptor
@@ -52,13 +53,14 @@ class FullDuplex {
  * The node itself may be a thread or a process or multi-threads.
  *
  */
+// FIXME: typename std::enable_if<is_smart_pointer<CHN>::value, int>::type = 0
 template <typename CHN, NodeType type>
 class Node {
  public:
   // the message type of specified channels.
-  typedef typename CHN::value_type msg_type;
+  typedef typename CHN::element_type::value_type msg_type;
   Node() = default;
-  Node(const std::string& name) : name_(name) {}
+  explicit Node(const std::string& name) : name_(name) {}
   virtual ~Node() = default;
   const NodeType Type() const;
   const std::string& GetName() const;
@@ -127,9 +129,9 @@ class Node {
   int worker_cnt_ = 0;
   std::string name_;
   // sink only have up channels
-  std::vector<std::reference_wrapper<CHN>> up_channels_;
+  std::vector<CHN> up_channels_;
   // source only have down channels.
-  std::vector<std::reference_wrapper<CHN>> down_channels_;
+  std::vector<CHN> down_channels_;
   DISALLOW_COPY_AND_ASSIGN(Node)
 };
 
@@ -157,7 +159,7 @@ void Node<CHN, type>::AddChannel(CHN& channel, bool is_down) {
 template <typename CHN, NodeType type>
 CHN& Node<CHN, type>::GetChannel(int i, bool is_down) {
   auto& channels = is_down ? down_channels_ : up_channels_;
-  return channels.at(i).get();
+  return channels.at(i);
 }
 
 template <typename CHN, NodeType type>
@@ -169,14 +171,17 @@ int Node<CHN, type>::GetChannelNum(bool is_down) {
 template <typename CHN, NodeType type>
 void Node<CHN, type>::Dispatch(const msg_type& msg) {
   auto id = msg->id() % down_channels_.size();
-  down_channels_.at(id).get().WriteMessage(msg);
+  down_channels_.at(id).get()->WriteMessage(msg);
 }
 
 template <typename CHN, NodeType type>
 void Node<CHN, type>::HandlerRelaying(CHN& channel) {
   msg_type msg;
   // receive
-  channel.ReadMessage(msg);
+  channel->ReadMessage(msg);
+  if (msg == nullptr) {
+    return;
+  }
   // process
   auto res = HandleMsg(msg);
   // relay
@@ -197,6 +202,7 @@ void Node<CHN, type>::DoWork() {
 
 template <typename CHN, NodeType type>
 int Node<CHN, type>::IncThreads() {
+  assert(up_channels_.size() != 0);
   int selected = 0;
   std::unique_lock<std::mutex> lg(mutex_);
   selected = worker_cnt_ % up_channels_.size();

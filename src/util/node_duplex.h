@@ -19,19 +19,24 @@
  * @brief A duplex node which may act as udp or tcp service.
  *
  */
-class NodeDuplex : public Node<MsgChannel, NodeType::NODE_FULL_DUPLEX>,
-                   public FullDuplex<typename MsgChannel::value_type> {
+class NodeDuplex
+    : public Node<MsgChannelPtr, NodeType::NODE_FULL_DUPLEX>,
+      public FullDuplex<typename MsgChannelPtr::element_type::value_type> {
  public:
-  typedef typename MsgChannel::value_type msg_type;
-  NodeDuplex(const std::string& name)
-      : Node<MsgChannel, NodeType::NODE_FULL_DUPLEX>(name) {}
+  typedef typename MsgChannelPtr::element_type::value_type msg_type;
+  explicit NodeDuplex(const std::string& name)
+      : Node<MsgChannelPtr, NodeType::NODE_FULL_DUPLEX>(name) {}
   virtual ~NodeDuplex() {}
   // NodeDuplex  has its own way to implement `DoWork` function.
   void DoWork() override {
     ThreadAffinity();
     auto chn_index = IncThreads();
-    auto& channel = up_channels_.at(chn_index);
-    std::function<void(MsgChannel&)> handler = handler =
+    std::cout << chn_index << " up_channels_.size " << up_channels_.size()
+              << std::endl;
+    // auto& channel = up_channels_.at(chn_index);
+    MsgChannelPtr& channel = up_channels_.at(chn_index);
+    std::cout << channel->Id() << std::endl;
+    std::function<void(MsgChannelPtr&)> handler =
         std::bind(&NodeDuplex::HandleWritting, this, std::placeholders::_1);
     while (!is_stop_) {
       handler(channel);
@@ -43,14 +48,18 @@ class NodeDuplex : public Node<MsgChannel, NodeType::NODE_FULL_DUPLEX>,
    *
    * @param channel
    */
-  void HandleWritting(MsgChannel& channel) override {
+  void HandleWritting(MsgChannelPtr& channel) override {
     msg_type msg;
+    std::cout << channel->Id() << std::endl;
     // receive
-    channel.ReadMessage(msg);
+    channel->ReadMessage(msg);
+    if (msg == nullptr) {
+      return;
+    }
     // process
     auto res = HandleMsg(msg);
     // write
-    SinkWrite(res);
+    FDWrite(res);
   }
   /**
    * @brief do some processing for the received msg.
@@ -68,7 +77,7 @@ class NodeDuplex : public Node<MsgChannel, NodeType::NODE_FULL_DUPLEX>,
    *
    * @return int
    */
-  virtual int SourceRecv() = 0;
+  virtual int FDRecv() = 0;
   /**
    * @brief Define the way to write msg to the file
    * descriptor.
@@ -76,7 +85,7 @@ class NodeDuplex : public Node<MsgChannel, NodeType::NODE_FULL_DUPLEX>,
    * @param msg
    * @return int
    */
-  virtual int SinkWrite(const msg_type& msg) = 0;
+  virtual int FDWrite(const msg_type& msg) = 0;
 };
 
 #endif  // SRC_EXAMPLE_APP_SRC_NODE_DUPLEX_H_

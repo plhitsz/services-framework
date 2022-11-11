@@ -75,7 +75,7 @@ class NodeManager {
   bool RunAsThreads(Node<CHN, type>& node, int num = 1);
 
   /**
-   * @brief For udp or tun node, they are using `SourceRecv` to get input data.
+   * @brief For udp or tun node, they are using `FDRecv` to get input data.
    * Other `relay` nodes no neeed to call this function.
    *
    * @param node
@@ -129,34 +129,35 @@ bool NodeManager::Connect(Node<CHN, uptype>& up, Node<CHN, downtype>& down,
     if (up_use_out && up.GetChannelNum(up_use_out) != 0) {
       auto& selected_chn = up.GetChannel(0, true);
       down.AddChannel(selected_chn, down_use_out);
-      flow += selected_chn.Id();
+      flow += selected_chn->Id();
       connect_done = true;
     } else if (!up_use_out && up.GetChannelNum(up_use_out) != 0) {
       auto& selected_chn = up.GetChannel(0, false);
       down.AddChannel(selected_chn, down_use_out);
-      flow += selected_chn.Id();
+      flow += selected_chn->Id();
       connect_done = true;
     } else if (down_use_out && down.GetChannelNum(down_use_out) != 0) {
       // select from downstream
       auto& selected_chn = down.GetChannel(0, down_use_out);
       up.AddChannel(selected_chn, up_use_out);
-      flow += selected_chn.Id();
+      flow += selected_chn->Id();
       connect_done = true;
     } else if (!down_use_out && down.GetChannelNum(down_use_out) != 0) {
       // select from downstream
       auto& selected_chn = down.GetChannel(0, down_use_out);
       up.AddChannel(selected_chn, up_use_out);
-      flow += selected_chn.Id();
+      flow += selected_chn->Id();
       connect_done = true;
     }
   }
 
   // reuse_chn = false or no channels at all.
   if (!connect_done) {
-    auto&& selected_chn = MsgChannel(qname);
+    typedef typename MsgChannelPtr::element_type MsgChannelType;
+    auto selected_chn = std::make_shared<MsgChannelType>(qname);
     down.AddChannel(selected_chn, down_use_out);
     up.AddChannel(selected_chn, up_use_out);
-    flow += selected_chn.Id();
+    flow += selected_chn->Id();
   }
   flow += " ";
   flow += qname;
@@ -173,6 +174,11 @@ bool NodeManager::Connect(Node<CHN, uptype>& up, Node<CHN, downtype>& down,
 
 template <typename CHN, NodeType type>
 bool NodeManager::RunAsThreads(Node<CHN, type>& node, int num) {
+  auto c = node.GetChannelNum(false) + node.GetChannelNum(true);
+  if (c <= 0) {
+    throw std::runtime_error("node has no available channels.");
+  }
+
   for (int i = 0; i < num; i++) {
     worker_list_.emplace_back(std::thread(&Node<CHN, type>::DoWork, &node));
   }
@@ -192,7 +198,7 @@ inline bool NodeManager::RegisterToPoller(NodeDuplex& node) {
     auto& response = rsp;
     if (response.events & EPOLLIN) {
       while (true) {
-        auto ret = node.SourceRecv();
+        auto ret = node.FDRecv();
         if (ret < 0 && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) {
           break;
         }

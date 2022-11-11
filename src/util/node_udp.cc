@@ -50,7 +50,7 @@ bool Udp::Init() {
   return true;
 }
 
-int Udp::SourceRecv() {
+int Udp::FDRecv() {
   typedef typename msg_type::element_type msg_org_type;
   msg_type msg = std::make_shared<msg_org_type>();
   int ret = recvfrom(fd_, (char*)msg->begin(), msg->size(), 0, NULL, NULL);
@@ -60,7 +60,7 @@ int Udp::SourceRecv() {
   return ret;
 }
 
-int Udp::SinkWrite(const msg_type& msg) {
+int Udp::FDWrite(const msg_type& msg) {
   return sendto(fd_, (char*)msg->begin(), msg->size(), 0,
                 (struct sockaddr*)&msg->encodeInfo().dst_addr,
                 sizeof(sockaddr_in));
