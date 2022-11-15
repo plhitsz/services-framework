@@ -15,6 +15,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "macros.h"
@@ -53,7 +54,6 @@ class FullDuplex {
  * The node itself may be a thread or a process or multi-threads.
  *
  */
-// FIXME: typename std::enable_if<is_smart_pointer<CHN>::value, int>::type = 0
 template <typename CHN, NodeType type>
 class Node {
  public:
@@ -62,6 +62,19 @@ class Node {
   Node() = default;
   explicit Node(const std::string& name) : name_(name) {}
   virtual ~Node() = default;
+  friend std::ostream& operator<<(std::ostream& os,
+                                  const Node<CHN, type>& node) {
+    {
+      os.flags(std::ios::left);
+      os.width(12);
+      os.fill(' ');
+      os << ("Node:  " + node.GetName());
+    }
+    os << "\tthreads: " << node.Threads()
+       << "\tup-channel: " << node.GetChannelNum(ChnType::CHN_IN)
+       << "\tdown-channel: " << node.GetChannelNum(ChnType::CHN_OUT);
+    return os;
+  }
   const NodeType Type() const;
   const std::string& GetName() const;
   /**
@@ -73,27 +86,29 @@ class Node {
    */
   bool StopSignal(const msg_type& msg);
   /**
-   * @brief Add a new channel to node.
-   *
-   * @param channel
-   * @param is_down True: the added channel is a down channel.
-   */
-  void AddChannel(CHN& channel, bool is_down);
-  CHN& GetChannel(int i, bool is_down);
-  int GetChannelNum(bool is_down);
-  /**
    * @brief Realy msg to other nodes.
    *
    * @param channel
    */
   void HandlerRelaying(CHN& channel);
   /**
+   * @brief Operations on channels. Node duplex may rewrite those functions
+   * since they have different defination for upstream channel and downstream
+   * channels.
+   *
+   */
+  virtual void AddChannel(CHN& channel, ChnType ct = ChnType::CHN_OUT);
+  virtual CHN& GetChannel(int i, ChnType ct = ChnType::CHN_OUT);
+  virtual int GetChannelNum(ChnType ct = ChnType::CHN_OUT) const;
+  /**
    * @brief Process the data from up-channel and relay data to down-channel.
    * This function is the entry of threads.
+   * NodeDuplex  has its own way to implement `DoWork` function. get msg from
+   * `down_channels_` and write to FD.
    */
   virtual void DoWork();
   /**
-   * @brief Dispatch msg to down nodes.
+   * @brief Dispatch msg to "down-stream" channels.
    *
    * @param msg
    */
@@ -105,7 +120,7 @@ class Node {
    */
   virtual void HandleWritting(CHN& channel) = 0;
   // process the msg.
-  virtual auto HandleMsg(const msg_type& msg) -> msg_type = 0;
+  virtual void HandleMsg(const msg_type& msg) = 0;
   /**
    * @brief Thread affinty
    *
@@ -118,7 +133,19 @@ class Node {
    */
   int IncThreads();
 
+  int Threads() const;
+
   bool isOk() { return !is_stop_; }
+
+  void Stop() {
+    is_stop_ = true;
+    for (auto& chn : up_channels_) {
+      chn->GetQueue().BreakAllWait();
+    }
+    for (auto& chn : down_channels_) {
+      chn->GetQueue().BreakAllWait();
+    }
+  }
 
  protected:
   std::mutex mutex_;
@@ -151,53 +178,73 @@ bool Node<CHN, type>::StopSignal(const msg_type& msg) {
 }
 
 template <typename CHN, NodeType type>
-void Node<CHN, type>::AddChannel(CHN& channel, bool is_down) {
-  auto& channels = is_down ? down_channels_ : up_channels_;
+void Node<CHN, type>::AddChannel(CHN& channel, ChnType ct) {
+  auto& channels = ((ct == ChnType::CHN_OUT) ? down_channels_ : up_channels_);
   channels.push_back(channel);
 }
 
 template <typename CHN, NodeType type>
-CHN& Node<CHN, type>::GetChannel(int i, bool is_down) {
-  auto& channels = is_down ? down_channels_ : up_channels_;
+CHN& Node<CHN, type>::GetChannel(int i, ChnType ct) {
+  auto& channels = ((ct == ChnType::CHN_OUT) ? down_channels_ : up_channels_);
   return channels.at(i);
 }
 
 template <typename CHN, NodeType type>
-int Node<CHN, type>::GetChannelNum(bool is_down) {
-  auto& channels = is_down ? down_channels_ : up_channels_;
+int Node<CHN, type>::GetChannelNum(ChnType ct) const {
+  auto& channels = ((ct == ChnType::CHN_OUT) ? down_channels_ : up_channels_);
   return channels.size();
 }
-
 template <typename CHN, NodeType type>
-void Node<CHN, type>::Dispatch(const msg_type& msg) {
-  auto id = msg->id() % down_channels_.size();
-  down_channels_.at(id).get()->WriteMessage(msg);
+inline void Node<CHN, type>::Dispatch(const msg_type& msg) {
+  if (GetChannelNum(ChnType::CHN_OUT) == 0) {
+    return;
+  }
+  auto id = msg->id() % GetChannelNum(ChnType::CHN_OUT);
+  GetChannel(id, ChnType::CHN_OUT)->WriteMessage(msg);
 }
 
 template <typename CHN, NodeType type>
 void Node<CHN, type>::HandlerRelaying(CHN& channel) {
-  msg_type msg;
+  msg_type msg = nullptr;
   // receive
   channel->ReadMessage(msg);
   if (msg == nullptr) {
     return;
   }
+
+  if (unlikely(StopSignal(msg))) {
+    LOG(INFO) << GetName() << " received stop signal";
+    Dispatch(msg);
+    return;
+  }
+  // LOG(INFO) << GetName() << " handle msg from " << channel->Id();
   // process
-  auto res = HandleMsg(msg);
-  // relay
-  Dispatch(res);
+  HandleMsg(msg);
 }
 
 template <typename CHN, NodeType type>
 void Node<CHN, type>::DoWork() {
   ThreadAffinity();
   auto chn_index = IncThreads();
-  auto& channel = up_channels_.at(chn_index);
-  std::function<void(CHN&)> handler =
-      std::bind(&Node::HandlerRelaying, this, std::placeholders::_1);
-  while (!is_stop_) {
-    handler(channel);
+  auto& channel = GetChannel(chn_index, ChnType::CHN_IN);
+  if (type == NodeType::NODE_FULL_DUPLEX) {
+    std::function<void(CHN&)> handler =
+        std::bind(&Node::HandleWritting, this, std::placeholders::_1);
+    while (!is_stop_) {
+      handler(channel);
+    }
+  } else {
+    std::function<void(CHN&)> handler =
+        std::bind(&Node::HandlerRelaying, this, std::placeholders::_1);
+    while (!is_stop_) {
+      handler(channel);
+    }
   }
+}
+
+template <typename CHN, NodeType type>
+int Node<CHN, type>::Threads() const {
+  return worker_cnt_;
 }
 
 template <typename CHN, NodeType type>
@@ -236,5 +283,9 @@ void Node<CHN, type>::ThreadAffinity() {
               << " to " << processor_id % g_max_processor_id;
   }
 }
+
+using MsgRelayNode = Node<MsgChannelPtr, NodeType::NODE_RELAY>;
+using MsgSourceNode = Node<MsgChannelPtr, NodeType::NODE_SOURCE>;
+using MsgSinkNode = Node<MsgChannelPtr, NodeType::NODE_SINK>;
 
 #endif  // SRC_EXAMPLE_APP_SRC_NODE_H_

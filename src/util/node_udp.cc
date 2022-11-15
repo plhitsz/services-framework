@@ -16,6 +16,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "protocol.h"
+#include "util.h"
+#include "util/bats_msg.h"
 namespace bats {
 namespace src {
 
@@ -51,22 +54,35 @@ bool Udp::Init() {
 }
 
 int Udp::FDRecv() {
-  typedef typename msg_type::element_type msg_org_type;
-  msg_type msg = std::make_shared<msg_org_type>();
+  auto msg = std::make_shared<bats::util::BatsMsg>();
   int ret = recvfrom(fd_, (char*)msg->begin(), msg->size(), 0, NULL, NULL);
-  if (ret >= 0) {
+  if (ret > 0) {
+    msg->resize(ret);
+    msg->decode();
     Dispatch(msg);
   }
   return ret;
 }
 
 int Udp::FDWrite(const msg_type& msg) {
+  // =========== init protocol header =============
+  struct BatsHeader* proto_hdr = (struct BatsHeader*)msg->begin();
+  if (msg->NeedCoded()) {
+    proto_hdr->flow_id = htonll(msg->encodeInfo().flow_id);
+    proto_hdr->file_id = htonl(msg->id());
+    proto_hdr->batch_id = htonl(msg->seq());
+    proto_hdr->pac_num = htons(msg->encodeInfo().pac_num);
+    proto_hdr->pac_type = 1;
+  } else {
+    // setting `file_id` and `pac_type`
+    proto_hdr->file_id = htonl(msg->id());
+    proto_hdr->pac_type = 0;  // raw packet.
+    proto_hdr->flow_id = htonll(msg->encodeInfo().flow_id);
+  }
   return sendto(fd_, (char*)msg->begin(), msg->size(), 0,
                 (struct sockaddr*)&msg->encodeInfo().dst_addr,
                 sizeof(sockaddr_in));
 }
-
-auto Udp::HandleMsg(const msg_type& msg) -> msg_type { return msg; }
 
 }  // namespace src
 }  // namespace bats

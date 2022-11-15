@@ -29,8 +29,6 @@ class Udp : public NodeDuplex {
     }
   }
   virtual ~Udp() {}
-  // Node
-  virtual auto HandleMsg(const msg_type& msg) -> msg_type;
 
   // FullDuplex
   int FDRecv() override;

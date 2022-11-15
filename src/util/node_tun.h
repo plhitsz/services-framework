@@ -24,14 +24,13 @@ namespace src {
  */
 class Tun : public NodeDuplex {
  public:
-  Tun() : NodeDuplex("TUN") {
+  Tun(const std::string& ifname, const std::string& ip)
+      : NodeDuplex(ifname), ipaddr_(ip) {
     if (!Init()) {
       throw std::runtime_error("TUN node init failed.");
     }
   }
   virtual ~Tun() {}
-  // Node
-  auto HandleMsg(const msg_type& msg) -> msg_type override;
 
   // FullDuplex
   int FDRecv() override;
@@ -39,6 +38,7 @@ class Tun : public NodeDuplex {
   bool Init() override;
 
  private:
+  std::string ipaddr_;
   DISALLOW_COPY_AND_ASSIGN(Tun)
 };
 

@@ -23,12 +23,16 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "util.h"
+#include "util/net_msg.h"
+
 namespace bats {
 namespace src {
 
 const char TUN_DEVICE[] = "/dev/net/tun";
 
 bool Tun::Init() {
+  SYSLOG(INFO) << "tun init";
   if ((fd_ = open(TUN_DEVICE, O_RDWR)) < 0) {
     LOG(INFO) << "Opening " << TUN_DEVICE << " failed";
     return false;
@@ -44,15 +48,32 @@ bool Tun::Init() {
     close(fd_);
     return false;
   }
+  // setting address
+  int masklen = 24;
+  auto mask =
+      bats::util::IntToIpString(htonl((uint32_t)NETMASK_VALUE(32 - masklen)));
+  bats::util::exe_shell("ifconfig %s %s netmask %s", name_.c_str(),
+                        ipaddr_.c_str(), mask.c_str());
+  bats::util::exe_shell("echo 0 > /proc/sys/net/ipv4/conf/%s/rp_filter",
+                        name_.c_str());
+  bats::util::exe_shell("ifconfig %s up", name_.c_str());
   is_stop_ = false;
   return true;
 }
 
 int Tun::FDRecv() {
-  typedef typename msg_type::element_type msg_org_type;
-  msg_type msg = std::make_shared<msg_org_type>();
+  auto msg = std::make_shared<bats::util::NetMsg>();
   int ret = read(fd_, (char*)msg->begin(), msg->size());
-  // FIXME: resize ?
+  if (ret < 0) {
+    return ret;
+  }
+  msg->resize(ret);
+  msg->decode();
+  // handle IPv4 packet
+  if (!msg->IsIPv4()) {
+    SYSLOG(INFO) << "Tun drop none ipv4 msg";
+    return 0;
+  }
   if (ret >= 0) {
     Dispatch(msg);
   }
@@ -97,8 +118,6 @@ int Tun::FDWrite(const msg_type& msg) {
   }
   return msg->size();
 }
-
-auto Tun::HandleMsg(const msg_type& msg) -> msg_type { return msg; }
 
 }  // namespace src
 }  // namespace bats

@@ -12,35 +12,42 @@
 #ifndef SRC_EXAMPLE_APP_SRC_NODE_DUPLEX_H_
 #define SRC_EXAMPLE_APP_SRC_NODE_DUPLEX_H_
 
+#include <memory>
+
 #include "channel.h"
+#include "io/poll_data.h"
+#include "io/poller.h"
 #include "node.h"
 
+class NodeDuplex;
+using NodeDuplexPtr = std::shared_ptr<NodeDuplex>;
 /**
  * @brief A duplex node which may act as udp or tcp service.
  *
  */
 class NodeDuplex
     : public Node<MsgChannelPtr, NodeType::NODE_FULL_DUPLEX>,
-      public FullDuplex<typename MsgChannelPtr::element_type::value_type> {
+      public FullDuplex<typename MsgChannelPtr::element_type::value_type>,
+      public std::enable_shared_from_this<NodeDuplex> {
  public:
   typedef typename MsgChannelPtr::element_type::value_type msg_type;
   explicit NodeDuplex(const std::string& name)
       : Node<MsgChannelPtr, NodeType::NODE_FULL_DUPLEX>(name) {}
   virtual ~NodeDuplex() {}
-  // NodeDuplex  has its own way to implement `DoWork` function.
-  void DoWork() override {
-    ThreadAffinity();
-    auto chn_index = IncThreads();
-    std::cout << chn_index << " up_channels_.size " << up_channels_.size()
-              << std::endl;
-    // auto& channel = up_channels_.at(chn_index);
-    MsgChannelPtr& channel = up_channels_.at(chn_index);
-    std::cout << channel->Id() << std::endl;
-    std::function<void(MsgChannelPtr&)> handler =
-        std::bind(&NodeDuplex::HandleWritting, this, std::placeholders::_1);
-    while (!is_stop_) {
-      handler(channel);
-    }
+  // Duplex nodes use `up_channel` to recv data from poller and use
+  // `down_channel` to store the data which is requested to be written to `fd`.
+  void AddChannel(MsgChannelPtr& channel,
+                  ChnType ct = ChnType::CHN_OUT) override {
+    auto& channels = ((ct == ChnType::CHN_IN) ? down_channels_ : up_channels_);
+    channels.push_back(channel);
+  }
+  MsgChannelPtr& GetChannel(int i, ChnType ct = ChnType::CHN_OUT) override {
+    auto& channels = ((ct == ChnType::CHN_IN) ? down_channels_ : up_channels_);
+    return channels.at(i);
+  }
+  int GetChannelNum(ChnType ct = ChnType::CHN_OUT) const override {
+    auto& channels = ((ct == ChnType::CHN_IN) ? down_channels_ : up_channels_);
+    return channels.size();
   }
   /**
    * @brief Read msg from upstream channels, and forward it to a file
@@ -50,16 +57,14 @@ class NodeDuplex
    */
   void HandleWritting(MsgChannelPtr& channel) override {
     msg_type msg;
-    std::cout << channel->Id() << std::endl;
     // receive
     channel->ReadMessage(msg);
     if (msg == nullptr) {
       return;
     }
+    // LOG(INFO) << GetName() << " handle msg from " << channel->Id();
     // process
-    auto res = HandleMsg(msg);
-    // write
-    FDWrite(res);
+    HandleMsg(msg);
   }
   /**
    * @brief do some processing for the received msg.
@@ -67,8 +72,41 @@ class NodeDuplex
    * @param msg
    * @return msg_type
    */
-  virtual auto HandleMsg(const msg_type& msg) -> msg_type = 0;
+  virtual void HandleMsg(const msg_type& msg) {
+    // write
+    FDWrite(msg);
+  }
+  /**
+   * @brief For udp or tun node, they are using `FDRecv` to get input data.
+   * Other `relay` nodes no neeed to call this function.
+   *
+   * @param node
+   * @return true
+   * @return false
+   */
+  inline bool RegisterToPoller() {
+    auto self = shared_from_this();
+    bats::io::PollRequest req;
+    req.fd = this->GetFd();
+    assert(req.fd > 0);
+    fcntl(req.fd, F_SETFL, O_NONBLOCK);
+    req.events = EPOLLIN | EPOLLET;  // level trigger
+    req.timeout_ms = 0;
+    req.callback = [self](const bats::io::PollResponse& rsp) {
+      auto& response = rsp;
+      if (response.events & EPOLLIN) {
+        while (true) {
+          auto ret = self->FDRecv();
+          if (ret < 0 && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) {
+            break;
+          }
+        }
+      }
+    };
+    return bats::io::Poller::Instance()->Register(req);
+  }
 
+ private:
   // FullDuplex
   virtual bool Init() = 0;
   /**
