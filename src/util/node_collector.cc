@@ -1,6 +1,6 @@
 /**
  * @file node_collector.cc
- * @author peng lei (plhitsz@outlook.com)
+ * @author peng lei (peng.lei@n-hop.com)
  * @brief
  * @version 0.1
  * @date 2022-11-14
@@ -34,11 +34,8 @@ void Collector::HandleMsg(const msg_type& msg) {
   auto net = std::dynamic_pointer_cast<bats::util::NetMsg>(msg);
   assert(net != nullptr);
   // Find a proper decoder for this msg according to its real destination.
-  std::string nexthop = "127.0.0.1";
-  if (!simulate_mode_) {
-    nexthop = route_t_->RouteMatch(net->DstAddr());
-  }
-
+  // std::string nexthop = "127.0.0.1";
+  auto nexthop = route_t_->RouteMatch(net->DstAddr());
   if (unlikely(nexthop.empty())) {
     LOG(WARNING) << "Drop the msg without default route.";
     return;
@@ -110,7 +107,7 @@ BatsBuffer_ptr& Collector::GetBatsBuffer(const std::string& nexthop) {
 
 void Collector::ForceRelayData(const msg_type& msg,
                                const std::string& nexthop) {
-  std::vector<bats::util::BatsMsg_ptr> to_encoder;
+  std::vector<bats::util::BatsMsg_ptr> msg_to_udp;
   std::unique_lock<std::mutex> lg(mutex_, std::defer_lock);
   lg.lock();
   auto& bats_buffer = GetBatsBuffer(nexthop);
@@ -125,7 +122,7 @@ void Collector::ForceRelayData(const msg_type& msg,
               << buffer->id() << std::endl;
 #endif
     buffer->resize(buffer->FilledBytes());
-    to_encoder.push_back(buffer);
+    msg_to_udp.push_back(buffer);
     bats_buffer->ResetBuf();
     buffer = bats_buffer->GetBuf();
   }
@@ -134,19 +131,19 @@ void Collector::ForceRelayData(const msg_type& msg,
   buffer->fill((const octet*)msg->begin(), msg->size());
   buffer->resize(buffer->FilledBytes());
   buffer->NeedCoded() = false;
-  to_encoder.push_back(buffer);
+  msg_to_udp.push_back(buffer);
   bats_buffer->ResetBuf();
   lg.unlock();
 
   // to encoder
-  for (auto& b : to_encoder) {
+  for (auto& b : msg_to_udp) {
     Dispatch(b);
   }
-  std::vector<bats::util::BatsMsg_ptr>().swap(to_encoder);
+  std::vector<bats::util::BatsMsg_ptr>().swap(msg_to_udp);
 }
 
 void Collector::BufferingData(const msg_type& msg, const std::string& nexthop) {
-  std::vector<bats::util::BatsMsg_ptr> to_encoder;
+  std::vector<bats::util::BatsMsg_ptr> msg_to_encode;
   std::unique_lock<std::mutex> lg(mutex_, std::defer_lock);
   lg.lock();
   auto& bats_buffer = GetBatsBuffer(nexthop);
@@ -163,7 +160,7 @@ void Collector::BufferingData(const msg_type& msg, const std::string& nexthop) {
     LOG(INFO) << "forward " << buffer->size() << " bytes to encoder, file id "
               << buffer->id() << std::endl;
 #endif
-    to_encoder.push_back(buffer);
+    msg_to_encode.push_back(buffer);
     // create a new one
     bats_buffer->ResetBuf();
   }
@@ -177,15 +174,15 @@ void Collector::BufferingData(const msg_type& msg, const std::string& nexthop) {
               << buffer->id() << std::endl;
 #endif
     bats_buffer->ResetBuf();
-    to_encoder.push_back(buffer);
+    msg_to_encode.push_back(buffer);
   }
   lg.unlock();
 
   // to encoder
-  for (auto& b : to_encoder) {
+  for (auto& b : msg_to_encode) {
     Dispatch(b);
   }
-  std::vector<bats::util::BatsMsg_ptr>().swap(to_encoder);
+  std::vector<bats::util::BatsMsg_ptr>().swap(msg_to_encode);
 }
 
 // dispatch msg according to its type(coded or none-coded?)

@@ -37,15 +37,16 @@ class NodeDuplex
   // Duplex nodes use `up_channel` to recv data from poller and use
   // `down_channel` to store the data which is requested to be written to `fd`.
   void AddChannel(MsgChannelPtr& channel,
-                  ChnType ct = ChnType::CHN_OUT) override {
+                  ChnType ct = ChnType::CHN_OUT) override final {
     auto& channels = ((ct == ChnType::CHN_IN) ? down_channels_ : up_channels_);
     channels.push_back(channel);
   }
-  MsgChannelPtr& GetChannel(int i, ChnType ct = ChnType::CHN_OUT) override {
+  MsgChannelPtr& GetChannel(int i,
+                            ChnType ct = ChnType::CHN_OUT) override final {
     auto& channels = ((ct == ChnType::CHN_IN) ? down_channels_ : up_channels_);
     return channels.at(i);
   }
-  int GetChannelNum(ChnType ct = ChnType::CHN_OUT) const override {
+  int GetChannelNum(ChnType ct = ChnType::CHN_OUT) const override final {
     auto& channels = ((ct == ChnType::CHN_IN) ? down_channels_ : up_channels_);
     return channels.size();
   }
@@ -55,15 +56,13 @@ class NodeDuplex
    *
    * @param channel
    */
-  void HandleWritting(MsgChannelPtr& channel) override {
+  void HandleWritting(MsgChannelPtr& channel) override final {
     msg_type msg;
     // receive
     channel->ReadMessage(msg);
     if (msg == nullptr) {
       return;
     }
-    // LOG(INFO) << GetName() << " handle msg from " << channel->Id();
-    // process
     HandleMsg(msg);
   }
   /**
@@ -72,7 +71,7 @@ class NodeDuplex
    * @param msg
    * @return msg_type
    */
-  virtual void HandleMsg(const msg_type& msg) {
+  void HandleMsg(const msg_type& msg) override final {
     // write
     FDWrite(msg);
   }

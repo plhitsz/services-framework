@@ -114,24 +114,23 @@ bool NodeManager::Connect(Node<CHN, uptype>& up, Node<CHN, downtype>& down,
     flow = up.GetName() + "[in] ---(";
   }
 
-  bool connect_done = false;
   // checking the exsit channels
   if (reuse_chn) {
     if (up.GetChannelNum(ChnType::CHN_OUT) != 0) {
       auto& selected_chn = up.GetChannel(0, ChnType::CHN_OUT);
       down.AddChannel(selected_chn, ChnType::CHN_IN);
       flow += selected_chn->Id();
-      connect_done = true;
     } else if (down.GetChannelNum(ChnType::CHN_IN) != 0) {
       auto& selected_chn = down.GetChannel(0, ChnType::CHN_IN);
       up.AddChannel(selected_chn, ChnType::CHN_OUT);
       flow += selected_chn->Id();
-      connect_done = true;
     }
   }
 
   // reuse_chn = false or no channels at all.
-  if (!connect_done) {
+  if (!reuse_chn || (up.GetChannelNum(ChnType::CHN_OUT) +
+                         down.GetChannelNum(ChnType::CHN_IN) ==
+                     0)) {
     typedef typename MsgChannelPtr::element_type MsgChannelType;
     auto selected_chn = std::make_shared<MsgChannelType>(qname);
     up.AddChannel(selected_chn, ChnType::CHN_OUT);
@@ -139,6 +138,7 @@ bool NodeManager::Connect(Node<CHN, uptype>& up, Node<CHN, downtype>& down,
     flow += selected_chn->Id();
     channel_list_.push_back(selected_chn);
   }
+
   flow += " ";
   flow += qname;
   if (downtype == NodeType::NODE_FULL_DUPLEX) {

@@ -1,6 +1,6 @@
 /**
  * @file node_collector.h
- * @author peng lei (plhitsz@outlook.com)
+ * @author peng lei (peng.lei@n-hop.com)
  * @brief
  * @version 0.1
  * @date 2022-11-14
@@ -42,7 +42,6 @@ class Collector : public Node<MsgChannelPtr, NodeType::NODE_RELAY> {
   virtual ~Collector() { timeout_mgr_->Stop(); }
   // Node
   void HandleMsg(const msg_type& msg) override;
-  void HandleWritting(MsgChannelPtr& channel) override {}
   void Dispatch(const msg_type& msg) override;
 
  private:
@@ -77,7 +76,6 @@ class Collector : public Node<MsgChannelPtr, NodeType::NODE_RELAY> {
   void BufferingData(const msg_type& msg, const std::string& nexthop);
 
  private:
-  bool simulate_mode_ = false;
   int max_block_size_ = 0;
   int coding_threshold_ = 0;
   // the address of local TUN device. a encoder or decoder is globally

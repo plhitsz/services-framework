@@ -12,14 +12,19 @@
 #define SRC_EXAMPLE_APP_SRC_NODE_ENCODER_H_
 
 #include "all_schema.h"
+#include "channel.h"
 #include "encode.h"
+#include "node.h"
 #include "protocol.h"
+namespace bats {
+namespace src {
 
 using BatsEncoder_ptr = std::shared_ptr<bats::BatsEncoder>;
 
-class Encoder : public Node<MsgChannelPtr, NodeType::NODE_RELAY> {
+class Encoder : public Node<MsgChannelPtr, NodeType::NODE_RELAY>,
+                public std::enable_shared_from_this<Encoder> {
  public:
-  Encoder() {
+  Encoder() : Node<MsgChannelPtr, NodeType::NODE_RELAY>("encoder") {
     encode_ = std::make_shared<bats::BatsEncoder>();
     // used to reserve header room for coded msg.
     encode_->encodingInfo().mtu = 1500;
@@ -30,36 +35,30 @@ class Encoder : public Node<MsgChannelPtr, NodeType::NODE_RELAY> {
     auto schema = std::make_shared<bats::EncodingSchema>();
     encode_->setEncodeSchema(schema);
     encode_->setPrecodeSchema(pre);
+    encode_callback_f_ =
+        std::bind(&Encoder::Dispatch, this, std::placeholders::_1);
+    is_stop_ = false;
   }
   virtual ~Encoder() {}
-  virtual void HandleWritting(MsgChannelPtr& channel) {
-    // nothing to write
-  }
-  virtual auto HandleMsg(const msg_type& msg) -> msg_type {
-    if (!msg) {
-      return nullptr;
-    }
-    assert(msg->size() < 65540);
-    auto& out = GetChannel(0, false).GetQueue();
-    if (unlikely(StopSignal(msg))) {
-      LOG(INFO) << GetName() << " received stop signal";
-      out.WaitEnqueue(msg);
+  // handle msg to be coded only.
+  virtual void HandleMsg(const msg_type& msg) {
+    if (unlikely(!msg)) {
       return;
     }
-    // FIXME: how to use `HandleMsg` and `encode`
-    // callmap: HandleMsg--> DispatchMsg
-    if (msg->NeedCoded()) {
-      // encode_->encode(msg, out);
-    } else {
-      out.WaitEnqueue(msg);
+    assert(msg->size() < 65540);
+    if (unlikely(StopSignal(msg))) {
+      LOG(INFO) << GetName() << " received stop signal";
+      Dispatch(msg);
+      return;
     }
-    // FIXME: optimize
-    // data flow: TUN  ---> encoder ----->
-    //                 ---> transparent transmit --->
+
+    encode_->encode(msg, encode_callback_f_);
   }
 
  private:
   BatsEncoder_ptr encode_ = nullptr;
+  std::function<void(msg_type&)> encode_callback_f_;
 };
-
+}  // namespace src
+}  // namespace bats
 #endif  // SRC_EXAMPLE_APP_SRC_NODE_ENCODER_H_

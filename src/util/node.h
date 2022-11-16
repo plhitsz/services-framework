@@ -60,8 +60,8 @@ class Node {
   // the message type of specified channels.
   typedef typename CHN::element_type::value_type msg_type;
   Node() = default;
-  explicit Node(const std::string& name) : name_(name) {}
   virtual ~Node() = default;
+  explicit Node(const std::string& name) : name_(name) {}
   friend std::ostream& operator<<(std::ostream& os,
                                   const Node<CHN, type>& node) {
     {
@@ -75,8 +75,10 @@ class Node {
        << "\tdown-channel: " << node.GetChannelNum(ChnType::CHN_OUT);
     return os;
   }
-  const NodeType Type() const;
-  const std::string& GetName() const;
+  const NodeType Type() const { return type; }
+  const std::string& GetName() const { return name_; }
+  int Threads() const { return worker_cnt_; }
+  bool isOk() { return !is_stop_; }
   /**
    * @brief recv a stop signal.
    *
@@ -118,7 +120,7 @@ class Node {
    *
    * @param channel
    */
-  virtual void HandleWritting(CHN& channel) = 0;
+  virtual void HandleWritting(CHN& channel) {}
   // process the msg.
   virtual void HandleMsg(const msg_type& msg) = 0;
   /**
@@ -133,25 +135,12 @@ class Node {
    */
   int IncThreads();
 
-  int Threads() const;
-
-  bool isOk() { return !is_stop_; }
-
-  void Stop() {
-    is_stop_ = true;
-    for (auto& chn : up_channels_) {
-      chn->GetQueue().BreakAllWait();
-    }
-    for (auto& chn : down_channels_) {
-      chn->GetQueue().BreakAllWait();
-    }
-  }
+  void Stop();
 
  protected:
   std::mutex mutex_;
   // init state is in `stopped` state
   bool is_stop_ = true;
-  int nid_ = 0;
   int tid_ = 0;
   int worker_cnt_ = 0;
   std::string name_;
@@ -164,8 +153,14 @@ class Node {
 
 // ******************************* basic implement ********************** //
 template <typename CHN, NodeType type>
-const std::string& Node<CHN, type>::GetName() const {
-  return name_;
+void Node<CHN, type>::Stop() {
+  is_stop_ = true;
+  for (auto& chn : up_channels_) {
+    chn->GetQueue().BreakAllWait();
+  }
+  for (auto& chn : down_channels_) {
+    chn->GetQueue().BreakAllWait();
+  }
 }
 
 template <typename CHN, NodeType type>
@@ -206,7 +201,6 @@ inline void Node<CHN, type>::Dispatch(const msg_type& msg) {
 template <typename CHN, NodeType type>
 void Node<CHN, type>::HandlerRelaying(CHN& channel) {
   msg_type msg = nullptr;
-  // receive
   channel->ReadMessage(msg);
   if (msg == nullptr) {
     return;
@@ -217,8 +211,6 @@ void Node<CHN, type>::HandlerRelaying(CHN& channel) {
     Dispatch(msg);
     return;
   }
-  // LOG(INFO) << GetName() << " handle msg from " << channel->Id();
-  // process
   HandleMsg(msg);
 }
 
@@ -243,23 +235,13 @@ void Node<CHN, type>::DoWork() {
 }
 
 template <typename CHN, NodeType type>
-int Node<CHN, type>::Threads() const {
-  return worker_cnt_;
-}
-
-template <typename CHN, NodeType type>
 int Node<CHN, type>::IncThreads() {
-  assert(up_channels_.size() != 0);
+  assert(GetChannelNum(ChnType::CHN_IN) != 0);
   int selected = 0;
   std::unique_lock<std::mutex> lg(mutex_);
-  selected = worker_cnt_ % up_channels_.size();
+  selected = worker_cnt_ % GetChannelNum(ChnType::CHN_IN);
   worker_cnt_++;
   return selected;
-}
-
-template <typename CHN, NodeType type>
-const NodeType Node<CHN, type>::Type() const {
-  return type;
 }
 
 template <typename CHN, NodeType type>
@@ -279,8 +261,11 @@ void Node<CHN, type>::ThreadAffinity() {
     LOG(WARNING) << "failed to set affinity on "
                  << processor_id % g_max_processor_id;
   } else {
-    LOG(INFO) << GetName() << " bind thread " << std::this_thread::get_id()
-              << " to " << processor_id % g_max_processor_id;
+    std::stringstream ss;
+    ss << std::this_thread::get_id();
+    ss >> tid_;
+    LOG(INFO) << GetName() << " bind thread " << tid_ << " to "
+              << processor_id % g_max_processor_id;
   }
 }
 
